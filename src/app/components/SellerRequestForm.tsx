@@ -1,5 +1,5 @@
 // src/components/SellerRequestForm.tsx
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import {
   Upload,
@@ -13,6 +13,12 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import { submitSellerRequest } from "../../services/sellerService";
+
+interface Category {
+  id: string;
+  name: string;
+  icon: string | null;
+}
 
 
 interface SellerRequestFormData {
@@ -42,6 +48,22 @@ export function SellerRequestForm() {
   const [submitStatus, setSubmitStatus] = useState<"idle" | "success" | "error">(
     "idle"
   );
+  const [categories, setCategories] = useState<any[]>([]);
+
+useEffect(() => {
+  const fetchCategories = async () => {
+    try {
+      const res = await fetch("https://backend-ikou.onrender.com/api/categories");
+      const data = await res.json();
+
+      setCategories(data.data.categories);
+    } catch (error) {
+      console.error("Failed to fetch categories", error);
+    }
+  };
+
+  fetchCategories();
+}, []);
 
   // Handle file uploads
   const handleIdImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -93,15 +115,6 @@ export function SellerRequestForm() {
     setTimeout(() => setSubmitStatus("idle"), 3000);
   };
 
-  // Mock categories
-  const categories = [
-    { id: "1", name: "Food & Beverages" },
-    { id: "2", name: "Fashion & Apparel" },
-    { id: "3", name: "Electronics" },
-    { id: "4", name: "Books & Stationery" },
-    { id: "5", name: "Services" },
-    { id: "6", name: "Other" },
-  ];
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 py-12 px-4">
