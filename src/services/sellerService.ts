@@ -37,7 +37,7 @@ export interface SellerRequestData {
       formData.append("profileImage", data.profileImage);
     }
   
-    const response = await fetch("/api/seller-request", {
+    const response = await fetch("https://backend-ikou.onrender.com/api/seller-request", {
       method: "POST",
       body: formData,
     });
