@@ -17,6 +17,52 @@ export interface SellerRequestData {
 
 // --- AUTH TOKEN UTILS ---
 const AUTH_DEBUG_PREFIX = "[AUTH][getToken]";
+const TOKEN_STORAGE_KEY = "telegramAuthToken";
+
+function normalizeToken(rawToken: string | null): string | null {
+  if (!rawToken) return null;
+
+  const trimmed = rawToken.trim();
+  if (!trimmed) return null;
+
+  // Some bot implementations accidentally send placeholder templates.
+  if (trimmed.includes("${") && trimmed.includes("}")) return null;
+
+  // Remove accidental wrapping quotes from bot string formatting.
+  const unwrapped = trimmed.replace(/^['\"]+|['\"]+$/g, "");
+  return unwrapped || null;
+}
+
+function getTokenFromHash(hash: string): string | null {
+  const hashWithoutPrefix = hash.startsWith("#") ? hash.slice(1) : hash;
+  if (!hashWithoutPrefix) return null;
+
+  // Handles: #token=abc and #/path?token=abc
+  const queryCandidate = hashWithoutPrefix.includes("?")
+    ? hashWithoutPrefix.split("?").slice(1).join("?")
+    : hashWithoutPrefix;
+
+  const params = new URLSearchParams(queryCandidate);
+  return params.get("token");
+}
+
+function removeTokenFromHash(hash: string): string {
+  const hashWithoutPrefix = hash.startsWith("#") ? hash.slice(1) : hash;
+  if (!hashWithoutPrefix) return "";
+
+  if (!hashWithoutPrefix.includes("?")) {
+    const params = new URLSearchParams(hashWithoutPrefix);
+    params.delete("token");
+    const query = params.toString();
+    return query ? `#${query}` : "";
+  }
+
+  const [routePart, ...queryParts] = hashWithoutPrefix.split("?");
+  const params = new URLSearchParams(queryParts.join("?"));
+  params.delete("token");
+  const query = params.toString();
+  return query ? `#${routePart}?${query}` : `#${routePart}`;
+}
 
 function maskToken(token: string | null): string {
   if (!token) return "<none>";
@@ -26,16 +72,19 @@ function maskToken(token: string | null): string {
 
 export async function authenticateTelegram(): Promise<string | null> {
   const params = new URLSearchParams(window.location.search);
+  const searchToken = normalizeToken(params.get("token"));
+  const hashToken = normalizeToken(getTokenFromHash(window.location.hash));
+
   console.log(`${AUTH_DEBUG_PREFIX} start`, {
     path: window.location.pathname,
-    hasTokenInUrl: params.has("token"),
+    hasTokenInUrl: Boolean(searchToken || hashToken),
     queryKeys: Array.from(params.keys()),
   });
 
-  const token = params.get("token");
+  const token = searchToken || hashToken;
 
   if (!token) {
-    const storedToken = localStorage.getItem("token");
+    const storedToken = normalizeToken(localStorage.getItem(TOKEN_STORAGE_KEY));
     console.log(`${AUTH_DEBUG_PREFIX} no token in URL, using localStorage`, {
       hasStoredToken: Boolean(storedToken),
       storedToken: maskToken(storedToken),
@@ -43,16 +92,17 @@ export async function authenticateTelegram(): Promise<string | null> {
     return storedToken;
   }
 
-  localStorage.setItem("token", token);
+  localStorage.setItem(TOKEN_STORAGE_KEY, token);
   console.log(`${AUTH_DEBUG_PREFIX} saved token to localStorage`, {
     token: maskToken(token),
   });
 
   params.delete("token");
   const query = params.toString();
+  const safeHash = removeTokenFromHash(window.location.hash);
   const newUrl = query
-    ? `${window.location.pathname}?${query}${window.location.hash}`
-    : `${window.location.pathname}${window.location.hash}`;
+    ? `${window.location.pathname}?${query}${safeHash}`
+    : `${window.location.pathname}${safeHash}`;
 
   if (window.history.replaceState) {
     window.history.replaceState({}, document.title, newUrl);
@@ -96,16 +146,18 @@ export async function submitSellerRequest(data: SellerRequestData) {
     return { success: false, error: "No authentication token found." };
   }
 
-  const response = await fetch(
-    "https://backend-ikou.onrender.com/api/seller-request",
-    {
-      method: "POST",
-      body: formData,
-      headers: {
-        Authorization: `Bearer ${token}`, // send token in headers
-      },
-    }
-  );
+  const requestUrl = new URL("https://backend-ikou.onrender.com/api/seller-request");
+  requestUrl.searchParams.set("token", token);
+
+  const response = await fetch(requestUrl.toString(), {
+    method: "POST",
+    body: formData,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      token,
+      "x-auth-token": token,
+    },
+  });
 
   const resData = await response.json().catch(() => null);
 
