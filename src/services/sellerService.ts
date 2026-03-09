@@ -15,6 +15,8 @@ export interface SellerRequestData {
   profileImage?: File | null; // Optional
 }
 
+type AgreedValueMode = "bool-string" | "numeric-string" | "html-checkbox";
+
 // --- AUTH TOKEN UTILS ---
 const AUTH_DEBUG_PREFIX = "[AUTH][getToken]";
 const TOKEN_STORAGE_KEY = "telegramAuthToken";
@@ -71,6 +73,54 @@ function maskToken(token: string | null): string {
   return `${token.slice(0, 8)}...${token.slice(-4)} (len=${token.length})`;
 }
 
+function coerceToBoolean(value: unknown): boolean {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value === 1;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    return normalized === "true" || normalized === "1" || normalized === "on";
+  }
+  return false;
+}
+
+function agreedValueByMode(agreed: boolean, mode: AgreedValueMode): string {
+  if (mode === "numeric-string") return agreed ? "1" : "0";
+  if (mode === "html-checkbox") return agreed ? "on" : "off";
+  return agreed ? "true" : "false";
+}
+
+function buildSellerRequestFormData(
+  data: SellerRequestData,
+  agreedMode: AgreedValueMode,
+): FormData {
+  const formData = new FormData();
+
+  formData.append("shopName", data.shopName);
+  formData.append("discription", data.discription);
+  formData.append("campusLocation", data.campusLocation);
+  formData.append("mainPhone", data.mainPhone);
+  formData.append("categoryId", data.categoryId);
+
+  const agreed = coerceToBoolean(data.agreedToRules);
+  formData.append("agreedToRules", agreedValueByMode(agreed, agreedMode));
+
+  if (data.instagram) formData.append("instagram", data.instagram);
+  if (data.telegram) formData.append("telegram", data.telegram);
+  if (data.tiktok) formData.append("tiktok", data.tiktok);
+  if (data.other) formData.append("other", data.other);
+  if (data.secondaryPhone) formData.append("secondaryPhone", data.secondaryPhone);
+
+  data.idImages.forEach((file) => {
+    formData.append("image", file);
+  });
+
+  if (data.profileImage) {
+    formData.append("profileImage", data.profileImage);
+  }
+
+  return formData;
+}
+
 export async function authenticateTelegram(): Promise<string | null> {
   const params = new URLSearchParams(window.location.search);
   const searchToken = normalizeToken(params.get("token"));
@@ -122,29 +172,7 @@ export async function authenticateTelegram(): Promise<string | null> {
 
 // --- SUBMIT SELLER REQUEST ---
 export async function submitSellerRequest(data: SellerRequestData) {
-  const formData = new FormData();
-
-  formData.append("shopName", data.shopName);
-  formData.append("discription", data.discription);
-  formData.append("campusLocation", data.campusLocation);
-  formData.append("mainPhone", data.mainPhone);
-  formData.append("categoryId", data.categoryId);
-  // Backend validator expects boolean-like string in multipart payload.
-  formData.append("agreedToRules", data.agreedToRules ? "true" : "false");
-
-  if (data.instagram) formData.append("instagram", data.instagram);
-  if (data.telegram) formData.append("telegram", data.telegram);
-  if (data.tiktok) formData.append("tiktok", data.tiktok);
-  if (data.other) formData.append("other", data.other);
-  if (data.secondaryPhone) formData.append("secondaryPhone", data.secondaryPhone);
-
-  data.idImages.forEach((file) => {
-    formData.append("image", file);
-  });
-
-  if (data.profileImage) {
-    formData.append("profileImage", data.profileImage);
-  }
+  let agreedMode: AgreedValueMode = "bool-string";
 
   // --- GET TOKEN ---
   const token = await authenticateTelegram();
@@ -155,7 +183,9 @@ export async function submitSellerRequest(data: SellerRequestData) {
   const requestUrl = new URL("https://backend-ikou.onrender.com/api/seller-request");
   requestUrl.searchParams.set("token", token);
 
-  const sendWithAuth = async (authorizationValue: string) => {
+  const sendWithAuth = async (authorizationValue: string, mode: AgreedValueMode) => {
+    const formData = buildSellerRequestFormData(data, mode);
+
     return fetch(requestUrl.toString(), {
       method: "POST",
       body: formData,
@@ -169,14 +199,41 @@ export async function submitSellerRequest(data: SellerRequestData) {
     });
   };
 
-  let response = await sendWithAuth(`Bearer ${token}`);
+  let response = await sendWithAuth(`Bearer ${token}`, agreedMode);
 
   // Some backends expect the raw JWT without the Bearer prefix.
   if (response.status === 401) {
-    response = await sendWithAuth(token);
+    response = await sendWithAuth(token, agreedMode);
   }
 
-  const resData = await response.json().catch(() => null);
+  let resData = await response.json().catch(() => null);
+
+  // Backend validators can differ for multipart checkbox values.
+  if (
+    response.status === 400 &&
+    typeof resData?.message === "string" &&
+    resData.message.toLowerCase().includes("agreedtorules")
+  ) {
+    agreedMode = "numeric-string";
+    response = await sendWithAuth(`Bearer ${token}`, agreedMode);
+    if (response.status === 401) {
+      response = await sendWithAuth(token, agreedMode);
+    }
+    resData = await response.json().catch(() => null);
+
+    if (
+      response.status === 400 &&
+      typeof resData?.message === "string" &&
+      resData.message.toLowerCase().includes("agreedtorules")
+    ) {
+      agreedMode = "html-checkbox";
+      response = await sendWithAuth(`Bearer ${token}`, agreedMode);
+      if (response.status === 401) {
+        response = await sendWithAuth(token, agreedMode);
+      }
+      resData = await response.json().catch(() => null);
+    }
+  }
 
   console.log("Status:", response.status);
   console.log("Response:", resData);
