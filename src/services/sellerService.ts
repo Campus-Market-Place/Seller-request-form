@@ -18,6 +18,7 @@ export interface SellerRequestData {
 // --- AUTH TOKEN UTILS ---
 const AUTH_DEBUG_PREFIX = "[AUTH][getToken]";
 const TOKEN_STORAGE_KEY = "telegramAuthToken";
+const LEGACY_TOKEN_STORAGE_KEYS = ["token", "authToken"];
 
 function normalizeToken(rawToken: string | null): string | null {
   if (!rawToken) return null;
@@ -84,7 +85,10 @@ export async function authenticateTelegram(): Promise<string | null> {
   const token = searchToken || hashToken;
 
   if (!token) {
-    const storedToken = normalizeToken(localStorage.getItem(TOKEN_STORAGE_KEY));
+    const storedToken =
+      normalizeToken(localStorage.getItem(TOKEN_STORAGE_KEY)) ||
+      LEGACY_TOKEN_STORAGE_KEYS.map((key) => normalizeToken(localStorage.getItem(key))).find(Boolean) ||
+      null;
     console.log(`${AUTH_DEBUG_PREFIX} no token in URL, using localStorage`, {
       hasStoredToken: Boolean(storedToken),
       storedToken: maskToken(storedToken),
@@ -125,12 +129,14 @@ export async function submitSellerRequest(data: SellerRequestData) {
   formData.append("campusLocation", data.campusLocation);
   formData.append("mainPhone", data.mainPhone);
   formData.append("categoryId", data.categoryId);
-  formData.append("agreedToRules", data.agreedToRules ? "1" : "0");
+  // Backend validator expects boolean-like string in multipart payload.
+  formData.append("agreedToRules", data.agreedToRules ? "true" : "false");
 
   if (data.instagram) formData.append("instagram", data.instagram);
   if (data.telegram) formData.append("telegram", data.telegram);
   if (data.tiktok) formData.append("tiktok", data.tiktok);
   if (data.other) formData.append("other", data.other);
+  if (data.secondaryPhone) formData.append("secondaryPhone", data.secondaryPhone);
 
   data.idImages.forEach((file) => {
     formData.append("image", file);
@@ -149,15 +155,26 @@ export async function submitSellerRequest(data: SellerRequestData) {
   const requestUrl = new URL("https://backend-ikou.onrender.com/api/seller-request");
   requestUrl.searchParams.set("token", token);
 
-  const response = await fetch(requestUrl.toString(), {
-    method: "POST",
-    body: formData,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      token,
-      "x-auth-token": token,
-    },
-  });
+  const sendWithAuth = async (authorizationValue: string) => {
+    return fetch(requestUrl.toString(), {
+      method: "POST",
+      body: formData,
+      credentials: "include",
+      headers: {
+        Authorization: authorizationValue,
+        token,
+        "x-auth-token": token,
+        Accept: "application/json",
+      },
+    });
+  };
+
+  let response = await sendWithAuth(`Bearer ${token}`);
+
+  // Some backends expect the raw JWT without the Bearer prefix.
+  if (response.status === 401) {
+    response = await sendWithAuth(token);
+  }
 
   const resData = await response.json().catch(() => null);
 
