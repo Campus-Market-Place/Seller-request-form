@@ -242,7 +242,7 @@ useEffect(() => {
             {/* Social Media */}
             <div className="space-y-4 pt-4 border-t">
               <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
-                <Instagram className="w-5 h-5" /> Social Media (Optional)
+                <Instagram className="w-5 h-5" /> Social Media
               </h2>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -250,10 +250,14 @@ useEffect(() => {
                   <div key={field}>
                     <label className="block text-sm font-medium text-gray-700 mb-2">
                       {field.charAt(0).toUpperCase() + field.slice(1)}
+                      {field === "telegram" && <span className="text-red-500"> *</span>}
                     </label>
+
                     <input
                       type="text"
-                      {...register(field as keyof SellerRequestFormData)}
+                      {...register(field as keyof SellerRequestFormData, {
+                        required: field === "telegram" ? "Telegram is required" : false,
+                      })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
                       placeholder={`@username or ${field}`}
                     />
@@ -261,7 +265,6 @@ useEffect(() => {
                 ))}
               </div>
             </div>
-
             {/* ID Images */}
             <div className="space-y-4 pt-4 border-t">
               <h2 className="text-xl font-semibold text-gray-900 flex items-center gap-2">
